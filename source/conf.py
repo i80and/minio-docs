@@ -112,4 +112,6 @@ rst_epilog = """
 
 .. |minio-operator-release| replace:: ``minio/k8s-operator:v3.0.27``
 
+.. |minio-server-release| replace::   ``minio/minio:RELEASE.2020-10-03T02-19-42Z``
+
 """

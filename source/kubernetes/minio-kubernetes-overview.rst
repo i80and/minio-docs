@@ -71,16 +71,20 @@ Deploy a MinIO Tenant
 The following procedure creates a MinIO tenant using the
 :mc:`kubectl minio` plugin.
 
-1) Create a Namespace for the MinIO Tenant
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+1) Initialize the MinIO Operator
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-Use the ``kubectl create namespace`` command to create a namespace for
-the MinIO Tenant:
+:mc:`kubectl minio` requires the MinIO Operator. Use the
+:mc-cmd:`kubectl minio init` command to initialize the MinIO Operator:
 
 .. code-block:: shell
    :class: copyable
 
-   kubectl create namespace minio-tenant-1
+   kubectl minio init
+
+The example command deploys the MinIO operator to the ``default`` namespace.
+Include the :mc-cmd-option:`~kubectl minio init namespace` option to
+specify the namespace you want to deploy the MinIO operator into.
 
 2) Configure the Persistent Volumes
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -91,14 +95,14 @@ for each drive on each node.
 MinIO recommends using :kube-docs:`local <concepts/storage/volumes/#local>` PVs
 to ensure best performance and operations. For example, given a Kubernetes
 cluster with 4 Nodes with 4 locally attached drives each, create a total of 16
-``local`` ``PVs``. Configure the ``nodeAffinity` for each ``PV`` to reflect
+``local`` ``PVs``. Configure the ``nodeAffinity`` for each ``PV`` to reflect
 the node on which the physical drive is installed.
 
 - Change ``persistentVolumeReclaimPolicy`` to ``Retain``
   if you want to keep data on disk after deleting the MinIO tenant or its
   associated Persistent Volume Claims (``PVC``). 
 
-- Change ``storageClassName`` to ``default``.
+- Set ``storageClassName`` to empty (``storageClassName: ``)
 
 Issue the ``kubectl get PV`` command to validate the created PVs:
 
@@ -107,19 +111,16 @@ Issue the ``kubectl get PV`` command to validate the created PVs:
 
    kubectl get PV
 
-3) Initialize the MinIO Operator
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+3) Create a Namespace for the MinIO Tenant
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-:mc:`kubectl minio` requires the MinIO Operator. Use the
-:mc-cmd:`kubectl minio init` command to initialize the MinIO Operator:
+Use the ``kubectl create namespace`` command to create a namespace for
+the MinIO Tenant:
 
 .. code-block:: shell
    :class: copyable
 
-   kubectl minio init --namespace-to-watch minio-tenant-1
-
-By default the MinIO operator deploys to the ``minio-operator`` namespace.
-You can override the namespace with 
+   kubectl create namespace minio-tenant-1
 
 4) Create the MinIO Tenant
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -167,21 +168,47 @@ The following table explains each argument specified to the command:
      - The Kubernetes namespace in which to deploy the MinIO Tenant.
 
 If :mc-cmd:`kubectl minio tenant create` succeeds in creating the MinIO Tenant,
-the command outputs connection information to the terminal. The output includes
-the :kube-docs:`Service <concepts/services-networking/service>` address for the
-tenant.
-
-5) Connect to the MinIO Tenant
-~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-
-Connect to the MinIO Tenant using the connection information returned by 
-:mc-cmd:`kubectl minio tenant create`. The following example configures
-:mc:`mc` to connect to the tenant:
+the command outputs connection information to the terminal. You can validate
+the created resources using ``kubectl get``:
 
 .. code-block:: shell
    :class: copyable
 
-   
+   kubectl get pv
+
+   kubectl get pvc --namespace minio-tenant-1
+
+   kubectl get pods --namespace minio-tenant-1
+
+5) Configure Access to the Service
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+:mc-cmd:`kubectl minio` creates a service for the MinIO Tenant.
+Use ``kubectl get svc`` to retrieve the service name:
+
+.. code-block:: shell
+   :class: copyable
+
+   kubectl get svc --namespace minio-tenant-1
+
+The command returns output similar to the following:
+
+.. code-block:: shell
+
+   NAME                     TYPE        CLUSTER-IP      EXTERNAL-IP   PORT(S)             AGE
+   minio                    ClusterIP   10.109.88.X     <none>        443/TCP             137m
+   minio-tenant-1-console   ClusterIP   10.97.87.X      <none>        9090/TCP,9443/TCP   129m
+   minio-tenant-1-hl        ClusterIP   None            <none>        9000/TCP            137m
+
+The created services are visible only within the Kubernetes cluster. There
+are a number of methods for configuring external access to the server. For
+example, you can configure an
+:kube-docs:`Ingress <concepts/services-networking/ingress>` that routes 
+traffic from an externally-accessible IP address or hostname to the 
+``minio`` service.
+
+ToDo: Basic Ingress Example.
+
 
 MinIO Kubernetes Plugin Syntax
 ------------------------------
@@ -193,6 +220,11 @@ Create a MinIO Tenant
 
 .. mc-cmd:: tenant create
    :fullpath:
+
+   Creates a MinIO Tenant using the 
+   :minio-git:`latest release <minio/minio/releases/latest>` of :mc:`minio`:
+
+   ``minio/minio:latest``
 
    The command has the following syntax:
 
@@ -246,7 +278,7 @@ Create a MinIO Tenant
       :mc-cmd-option:`~kubectl minio tenant create servers`.
 
       :mc:`kubectl minio` also configures each ``PVC`` with node-aware
-      selectors, such that the :mc:`minio` server process uses ``PVC``
+      selectors, such that the :mc:`minio` server process uses a ``PVC``
       which correspond to a ``local`` Persistent Volume (``PV``) on the 
       same node running that process. This ensures that each process
       uses local disks for optimal performance.
@@ -301,6 +333,15 @@ Expand a MinIO Tenant
 
    Adds a new zone to an existing MinIO Tenant.
 
+   The command creates the new zone using the 
+   :minio-git:`latest release <minio/minio/releases/latest>` of :mc:`minio`:
+
+   ``minio/minio:latest``
+
+   Consider using :mc-cmd:`kubectl minio tenant upgrade` to upgrade the
+   MinIO tenant *before* adding the new zone to ensure consistency across the
+   entire tenant.
+
    The command has the following syntax:
 
    .. code-block:: shell
@@ -329,36 +370,37 @@ Expand a MinIO Tenant
 
       The number of :mc:`minio` servers to deploy in the new MinIO Tenant zone.
       
-      Ensure that the specified number of :mc-cmd-option:`~kubectl minio tenant
-      create servers` does *not* exceed the number of unused nodes in the
-      Kubernetes cluster. MinIO strongly recommends sizing the cluster to have
-      one node per MinIO server in the new zone.
+      Ensure that the specified number of 
+      :mc-cmd-option:`~kubectl minio tenant expand servers` does *not* exceed
+      the number of unused nodes in the Kubernetes cluster. MinIO strongly
+      recommends sizing the cluster to have one node per MinIO server in the new
+      zone.
 
    .. mc-cmd:: volumes
       :option:
 
       *Required*
 
-      The number of volumes in the new MinIO Tenant zone. :mc:`kubectl minio`
-      generates one Persistent Volume Claim (``PVC``) for each volume.
-      :mc:`kubectl minio` divides the 
-      :mc-cmd-option:`~kubectl minio tenant create capacity` by the number of
-      volumes to determine the amount of ``resources.requests.storage`` to
-      set for each ``PVC``.
+      The number of volumes in the new MinIO Tenant zone. 
+      :mc:`kubectl minio` generates one Persistent Volume Claim (``PVC``) for
+      each volume. :mc:`kubectl minio` divides the 
+      :mc-cmd-option:`~kubectl minio tenant expand capacity` by the number of
+      volumes to determine the amount of ``resources.requests.storage`` to set
+      for each ``PVC``.
       
       :mc:`kubectl minio` determines
       the number of ``PVC`` to associate to each :mc:`minio` server by dividing
-      :mc-cmd-option:`~kubectl minio tenant create volumes` by 
-      :mc-cmd-option:`~kubectl minio tenant create servers`.
+      :mc-cmd-option:`~kubectl minio tenant expand volumes` by 
+      :mc-cmd-option:`~kubectl minio tenant expand servers`.
 
       :mc:`kubectl minio` also configures each ``PVC`` with node-aware
-      selectors, such that the :mc:`minio` server process uses ``PVC``
+      selectors, such that the :mc:`minio` server process uses a ``PVC``
       which correspond to a ``local`` Persistent Volume (``PV``) on the 
       same node running that process. This ensures that each process
       uses local disks for optimal performance.
 
       If the specified number of volumes exceeds the number of 
-      ``PV`` available on the cluster, :mc:`kubectl minio tenant create`
+      ``PV`` available on the cluster, :mc:`kubectl minio tenant expand`
       hangs and waits until the required ``PV`` exist.
 
    .. mc-cmd:: capacity
@@ -366,20 +408,21 @@ Expand a MinIO Tenant
 
       *Required*
 
-      The total capacity of the new MinIO Tenant zone. :mc:`kubectl minio` divides
-      the capacity by the number of
-      :mc-cmd-option:`~kubectl minio tenant create volumes` to determine the 
+      The total capacity of the new MinIO Tenant zone. :mc:`kubectl minio` 
+      divides the capacity by the number of
+      :mc-cmd-option:`~kubectl minio tenant expand volumes` to determine the 
       amount of ``resources.requests.storage`` to set for each
       Persistent Volume Claim (``PVC``).
 
       If the existing Persistent Volumes (``PV``) in the cluster cannot
-      satisfy the requested storage, :mc:`kubectl minio tenant create`
+      satisfy the requested storage, :mc:`kubectl minio tenant expand`
       hangs and waits until the required storage exists.
 
    .. mc-cmd:: namespace
       :option:
 
-      The namespace in which to create the new MinIO Tenant zone. 
+      The namespace in which to create the new MinIO Tenant zone. The namespace
+      *must* match that of the MinIO Tenant being extended.
 
       Defaults to ``minio``.
 
@@ -389,7 +432,7 @@ Expand a MinIO Tenant
       Outputs the generated ``YAML`` objects to ``STDOUT`` for further
       customization. 
       
-      :mc-cmd-option:`~kubectl minio tenant create output` does **not** create
+      :mc-cmd-option:`~kubectl minio tenant expand output` does **not** create
       the new MinIO Tenant zone. Use ``kubectl apply -f <FILE>`` to manually
       create the MinIO tenant using the generated file.
 
@@ -424,6 +467,9 @@ Get MinIO Tenant Zones
       The namespace in which to look for the MinIO Tenant.
 
       Defaults to ``minio``.
+
+Upgrade MinIO Tenant
+~~~~~~~~~~~~~~~~~~~~
 
 .. mc-cmd:: tenant upgrade
    :fullpath:
@@ -525,9 +571,6 @@ Create the MinIO Operator
       <minio/operator/releases/latest>`:
 
       ``minio/k8s-operator:latest``
-      
-      
-      The current latest release is |minio-operator-release|
 
    .. mc-cmd:: namespace
       :option:
