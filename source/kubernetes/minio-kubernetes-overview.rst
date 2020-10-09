@@ -95,14 +95,44 @@ for each drive on each node.
 MinIO recommends using :kube-docs:`local <concepts/storage/volumes/#local>` PVs
 to ensure best performance and operations. For example, given a Kubernetes
 cluster with 4 Nodes with 4 locally attached drives each, create a total of 16
-``local`` ``PVs``. Configure the ``nodeAffinity`` for each ``PV`` to reflect
-the node on which the physical drive is installed.
+``local`` ``PVs``.
 
-- Change ``persistentVolumeReclaimPolicy`` to ``Retain``
-  if you want to keep data on disk after deleting the MinIO tenant or its
-  associated Persistent Volume Claims (``PVC``). 
+.. code-block:: yaml
+   :class: copyable
 
-- Set ``storageClassName`` to empty (``storageClassName: ``)
+   apiVersion: v1
+   kind: PersistentVolume
+   metadata:
+     name: PV-NAME
+   spec:
+     capacity:
+       storage: 100Gi
+     volumeMode: Filesystem
+     accessModes:
+     - ReadWriteOnce
+     persistentVolumeReclaimPolicy: Retain
+     storageClassName: 
+     local:
+       path: /mnt/disks/ssd1
+     nodeAffinity:
+       required:
+         nodeSelectorTerms:
+         - matchExpressions:
+           - key: kubernetes.io/hostname
+             operator: In
+             values:
+             - NODE-NAME
+
+- Set ``PV-NAME`` to an name that supports easy visual identification of the PV
+  and its associated physical host. For example, for a PV on host ``minio-1``,
+  consider setting a PV name of ``minio-1-pv-1``.
+
+- Set ``NODE-NAME`` to the name of the node on which the physical disk is
+  installed.
+
+- ``storageClassName`` *must* be empty.
+
+- The ``path`` directory *must* be empty.
 
 Issue the ``kubectl get PV`` command to validate the created PVs:
 
@@ -126,7 +156,9 @@ the MinIO Tenant:
 ~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 Use the :mc-cmd:`kubectl minio tenant create` command to create the MinIO
-tenant. The following example creates a 4-node MinIO deployment with a
+Tenant.
+
+The following example creates a 4-node MinIO deployment with a
 total capacity of 16Ti across 16 drives.
 
 .. code-block:: shell
@@ -168,17 +200,28 @@ The following table explains each argument specified to the command:
      - The Kubernetes namespace in which to deploy the MinIO Tenant.
 
 If :mc-cmd:`kubectl minio tenant create` succeeds in creating the MinIO Tenant,
-the command outputs connection information to the terminal. You can validate
-the created resources using ``kubectl get``:
+the command outputs connection information to the terminal. The output includes
+the access key and secret key required for connecting to the MinIO server
+*and* the MinIO Console.
 
 .. code-block:: shell
-   :class: copyable
+   :emphasize-lines: 1-3, 6-8
+   
+   Tenant
+   Access Key: 999466bb-8bd6-4d73-8115-61df1b0311f4
+   Secret Key: f8e5ecc3-7657-493b-b967-aaf350daeec9
+   Version: minio/minio:RELEASE.2020-09-26T03-44-56Z
+   ClusterIP Service: minio-tenant-1-internal-service
 
-   kubectl get pv
+   MinIO Console
+   Access Key: e9ae0f3f-18e5-44c6-a2aa-dc2e95497734
+   Secret Key: 498ae13a-2f70-4adf-a38e-730d24327426
+   Version: minio/console:v0.3.14
+   ClusterIP Service: minio-tenant-1-console
 
-   kubectl get pvc --namespace minio-tenant-1
-
-   kubectl get pods --namespace minio-tenant-1
+Kubernetes users with permission to perform ``kubectl get secrets <secret>`` can
+view the secret contents and extract the access and secret key. The keys are
+Base64 encoded.
 
 5) Configure Access to the Service
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
@@ -200,12 +243,11 @@ The command returns output similar to the following:
    minio-tenant-1-console   ClusterIP   10.97.87.X      <none>        9090/TCP,9443/TCP   129m
    minio-tenant-1-hl        ClusterIP   None            <none>        9000/TCP            137m
 
-The created services are visible only within the Kubernetes cluster. There
-are a number of methods for configuring external access to the server. For
-example, you can configure an
-:kube-docs:`Ingress <concepts/services-networking/ingress>` that routes 
-traffic from an externally-accessible IP address or hostname to the 
-``minio`` service.
+The created services are visible only within the Kubernetes cluster. There are a
+number of methods within the Kubernetes ecosystem for configuring external
+access to the server. For example, you can configure an :kube-docs:`Ingress
+<concepts/services-networking/ingress>` that routes traffic from an
+externally-accessible IP address or hostname to the ``minio`` service.
 
 ToDo: Basic Ingress Example.
 
@@ -215,8 +257,112 @@ MinIO Kubernetes Plugin Syntax
 
 .. mc:: kubectl minio
 
+Create the MinIO Operator
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. mc-cmd:: init
+   :fullpath:
+
+   Initializes the MinIO Operator. :mc:`kubectl minio` requires the operator for
+   core functionality.
+
+   The command has the following syntax:
+
+   .. code-block:: shell
+      :class: copyable
+
+      kubectl minio init [FLAGS]
+
+   The command supports the following arguments:
+
+   .. mc-cmd:: image
+      :option:
+
+      The image to use for deploying the operator. 
+      Defaults to the :minio-git:`latest release of the operator
+      <minio/operator/releases/latest>`:
+
+      ``minio/k8s-operator:latest``
+
+   .. mc-cmd:: namespace
+      :option:
+
+      The namespace into which to deploy the operator.
+
+      Defaults to ``minio-operator``.
+
+   .. mc-cmd:: cluster-domain
+      :option:
+
+      The domain name to use when configuring the DNS hostname of the
+      operator. Defaults to ``cluster.local``.
+
+   .. mc-cmd:: namespace-to-watch
+      :option:
+
+      The namespace which the operator watches for MinIO tenants.
+
+      Defaults to ``""`` or *all namespaces*.
+
+   .. mc-cmd:: image-pull-secret
+      :option:
+
+      Secret key for use with pulling the 
+      :mc-cmd-option:`~kubectl minio init image`.
+
+      The MinIO-hosted ``minio/k8s-operator`` image is *not* password protected.
+      This option is only required for non-MinIO image sources which are
+      password protected.
+
+   .. mc-cmd:: output
+      :option:
+
+      Performs a dry run and outputs the generated YAML to ``STDOUT``. Use
+      this option to customize the YAML and apply it manually using
+      ``kubectl apply -f <FILE>``.
+
+Delete the MinIO Operator
+~~~~~~~~~~~~~~~~~~~~~~~~~
+
+.. mc-cmd:: delete
+   :fullpath:
+
+   Deletes the MinIO Operator along with all associated resources, 
+   including all MinIO Tenant instances in the
+   :mc-cmd:`watched namespace <kubectl minio init namespace-to-watch>`.
+
+   .. warning::
+
+      If the underlying Persistent Volumes (``PV``) were created with
+      a reclaim policy of ``recycle`` or ``delete``, deleting the MinIO
+      Tenant results in complete loss of all objects stored on the tenant.
+
+      Ensure you have performed all due diligence in confirming the safety of
+      any data on the MinIO Tenant prior to deletion.
+
+   The command has the following syntax:
+
+   .. code-block:: shell
+      :class: copyable
+
+      kubectl minio delete [FLAGS]
+
+   The command accepts the following arguments:
+
+   .. mc-cmd:: namespace
+      :option:
+
+      The namespace of the MinIO operator to delete.
+
+      Defaults to ``minio-operator``.
+
 Create a MinIO Tenant
 ~~~~~~~~~~~~~~~~~~~~~
+
+.. include:: /includes/facts-kubectl-plugin.rst
+   :start-after: start-kubectl-minio-requires-operator-desc
+   :end-before: end-kubectl-minio-requires-operator-desc
+
 
 .. mc-cmd:: tenant create
    :fullpath:
@@ -225,6 +371,22 @@ Create a MinIO Tenant
    :minio-git:`latest release <minio/minio/releases/latest>` of :mc:`minio`:
 
    ``minio/minio:latest``
+
+   The command creates the following resources in the Kubernetes cluster. 
+
+   - The MinIO Tenant.
+
+   - Persistent Volume Claims (``PVC``) for each  
+     :mc-cmd:`volume <kubectl minio tenant create volumes>` in the tenant.
+
+   - Pods for each
+     :mc-cmd:`server <kubectl minio tenant create servers>` in the tenant.
+
+   - Kubernetes secrets for storing access keys and secret keys. Each
+     secret is prefixed with the Tenant name.
+
+   - The MinIO Console Service (MCS). See the :minio-git:`console <console>` 
+     Github repository for more information on MCS.
 
    The command has the following syntax:
 
@@ -327,6 +489,10 @@ Create a MinIO Tenant
 
 Expand a MinIO Tenant
 ~~~~~~~~~~~~~~~~~~~~~
+
+.. include:: /includes/facts-kubectl-plugin.rst
+   :start-after: start-kubectl-minio-requires-operator-desc
+   :end-before: end-kubectl-minio-requires-operator-desc
 
 .. mc-cmd:: tenant expand
    :fullpath:
@@ -439,6 +605,10 @@ Expand a MinIO Tenant
 Get MinIO Tenant Zones
 ~~~~~~~~~~~~~~~~~~~~~~
 
+.. include:: /includes/facts-kubectl-plugin.rst
+   :start-after: start-kubectl-minio-requires-operator-desc
+   :end-before: end-kubectl-minio-requires-operator-desc
+
 .. mc-cmd:: tenant info
    :fullpath:
 
@@ -470,6 +640,10 @@ Get MinIO Tenant Zones
 
 Upgrade MinIO Tenant
 ~~~~~~~~~~~~~~~~~~~~
+
+.. include:: /includes/facts-kubectl-plugin.rst
+   :start-after: start-kubectl-minio-requires-operator-desc
+   :end-before: end-kubectl-minio-requires-operator-desc
 
 .. mc-cmd:: tenant upgrade
    :fullpath:
@@ -508,19 +682,24 @@ Upgrade MinIO Tenant
 Delete a MinIO Tenant
 ~~~~~~~~~~~~~~~~~~~~~
 
+.. include:: /includes/facts-kubectl-plugin.rst
+   :start-after: start-kubectl-minio-requires-operator-desc
+   :end-before: end-kubectl-minio-requires-operator-desc
+
 .. mc-cmd:: tenant delete
    :fullpath:
 
-   Deletes the MinIO Tenant.
+   Deletes the MinIO Tenant and its associated resources.
+
+   Kubernetes only deletes the Minio Tenant Persistent Volume Claims (``PVC``)
+   if the underlying Persistent Volumes (``PV``) were created with a 
+   reclaim policy of ``recycle`` or ``delete``. ``PV`` with a reclaim policy of
+   ``retain`` require manual deletion of their associated ``PVC``.
    
-   .. warning::
-
-      If the underlying Persistent Volumes (``PV``) were created with
-      a reclaim policy of ``recycle`` or ``delete``, deleting the MinIO
-      Tenant results in complete loss of all objects stored on the tenant.
-
-      Ensure you have performed all due diligence in confirming the safety of
-      any data on the MinIO Tenant prior to deletion.
+   Deletion of the underlying ``PV``, whether automatic or manual, results in
+   the loss of any objects stored on the MinIO Tenant. Perform all due 
+   diligence in ensuring the safety of stored data *prior* to deleting the 
+   tenant.
 
    The command has the following syntax:
 
@@ -544,102 +723,3 @@ Delete a MinIO Tenant
       The namespace in which to look for the MinIO Tenant.
 
       Defaults to ``minio``.
-
-Create the MinIO Operator
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. mc-cmd:: init
-   :fullpath:
-
-   Initializes the MinIO Operator. :mc:`kubectl minio` requires the operator for
-   core functionality.
-
-   The command has the following syntax:
-
-   .. code-block:: shell
-      :class: copyable
-
-      kubectl minio init [FLAGS]
-
-   The command supports the following arguments:
-
-   .. mc-cmd:: image
-      :option:
-
-      The image to use for deploying the operator. 
-      Defaults to the :minio-git:`latest release of the operator
-      <minio/operator/releases/latest>`:
-
-      ``minio/k8s-operator:latest``
-
-   .. mc-cmd:: namespace
-      :option:
-
-      The namespace into which to deploy the operator.
-
-      Defaults to ``minio-operator``.
-
-   .. mc-cmd:: cluster-domain
-      :option:
-
-      The domain name to use when configuring the DNS hostname of the
-      operator. Defaults to ``cluster.local``.
-
-   .. mc-cmd:: namespace-to-watch
-      :option:
-
-      The namespace which the operator watches for MinIO tenants.
-
-      Defaults to ``""`` or *all namespaces*.
-
-   .. mc-cmd:: image-pull-secret
-      :option:
-
-      Secret key for use with pulling the 
-      :mc-cmd-option:`~kubectl minio init image`.
-
-      The MinIO-hosted ``minio/k8s-operator`` image is *not* password protected.
-      This option is only required for non-MinIO image sources which are
-      password protected.
-
-   .. mc-cmd:: output
-      :option:
-
-      Performs a dry run and outputs the generated YAML to ``STDOUT``. Use
-      this option to customize the YAML and apply it manually using
-      ``kubectl apply -f <FILE>``.
-
-Delete the MinIO Operator
-~~~~~~~~~~~~~~~~~~~~~~~~~
-
-.. mc-cmd:: delete
-   :fullpath:
-
-   Deletes the MinIO Operator along with all associated resources, 
-   including all MinIO Tenant instances in the
-   :mc-cmd:`watched namespace <kubectl minio init namespace-to-watch>`.
-
-   .. warning::
-
-      If the underlying Persistent Volumes (``PV``) were created with
-      a reclaim policy of ``recycle`` or ``delete``, deleting the MinIO
-      Tenant results in complete loss of all objects stored on the tenant.
-
-      Ensure you have performed all due diligence in confirming the safety of
-      any data on the MinIO Tenant prior to deletion.
-
-   The command has the following syntax:
-
-   .. code-block:: shell
-      :class: copyable
-
-      kubectl minio delete [FLAGS]
-
-   The command accepts the following arguments:
-
-   .. mc-cmd:: namespace
-      :option:
-
-      The namespace of the MinIO operator to delete.
-
-      Defaults to ``minio-operator``.
