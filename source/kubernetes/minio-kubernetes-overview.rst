@@ -130,8 +130,6 @@ cluster with 4 Nodes with 4 locally attached drives each, create a total of 16
 - Set ``NODE-NAME`` to the name of the node on which the physical disk is
   installed.
 
-- ``storageClassName`` *must* be empty.
-
 - The ``path`` directory *must* be empty.
 
 Issue the ``kubectl get PV`` command to validate the created PVs:
@@ -220,13 +218,25 @@ the access key and secret key required for connecting to the MinIO server
    ClusterIP Service: minio-tenant-1-console
 
 Kubernetes users with permission to perform ``kubectl get secrets <secret>`` can
-view the secret contents and extract the access and secret key. The keys are
-Base64 encoded.
+view the secret contents and extract the access and secret key. Secrets created
+by :mc-cmd:`kubectl minio tenant create` are prefixed with the 
+tenant :mc-cmd:`name <kubectl minio tenant create name>`:
+
+.. code-block:: shell
+
+   > kubectl get secrets --namespace minio-tenant-1
+
+   NAME                            TYPE       DATA   AGE
+
+   minio-tenant-1-console-secret   Opaque     5      123d4h
+   minio-tenant-1-console-tls      Opaque     2      123d4h
+   minio-tenant-1-creds-secret     Opaque     2      123d4h
+   minio-tenant-1-tls              Opaque     2      123d4h
 
 5) Configure Access to the Service
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-:mc-cmd:`kubectl minio` creates a service for the MinIO Tenant.
+:mc:`kubectl minio` creates a service for the MinIO Tenant.
 Use ``kubectl get svc`` to retrieve the service name:
 
 .. code-block:: shell
